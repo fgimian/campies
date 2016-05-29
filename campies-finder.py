@@ -85,8 +85,8 @@ def get_supported_models(distribution_url):
 
 def main():
     print
-    print BOLD + 'BootCamp Package Finder by Fotis Gimian ' + ENDC
-    print BOLD + '(https://github.com/fgimian/bootcamp-package-finder)' + ENDC
+    print BOLD + 'Campies by Fotis Gimian' + ENDC
+    print BOLD + '(https://github.com/fgimian/campies)' + ENDC
     print
 
     # Get the Mac model using system profiler

@@ -1,4 +1,4 @@
-# BootCamp Package Finder
+# Campies
 
 *A little script to help you download the BootCamp package right for your Mac*
 
@@ -11,7 +11,7 @@ but attempts to be a cleaner and is a far simpler implementation.
    URL that you'll need to download to get BootCamp drivers for your machine:
 
     ```bash
-    ./bootcamp-package-finder.py
+    ./campies-finder.py
     ```
 
 2. Download the URL provided using your browser or a download manager such as
@@ -21,7 +21,7 @@ but attempts to be a cleaner and is a far simpler implementation.
    and prepare them as a ZIP file for use on Windows.
 
     ```bash
-    ./bootcamp-package-extractor.sh ~/Downloads/BootCampESD.pkg
+    ./campies-extractor.sh ~/Downloads/BootCampESD.pkg
     ```
 
     **Note**: Please replace the path of BootCampESD if required.

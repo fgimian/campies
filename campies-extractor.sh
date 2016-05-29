@@ -9,8 +9,8 @@ BLUE='\033[94m'
 ENDC='\033[0m'
 
 echo
-echo -e "${BOLD}BootCamp Package Finder by Fotis Gimian${ENDC}"
-echo -e "${BOLD}(https://github.com/fgimian/bootcamp-package-finder)${ENDC}"
+echo -e "${BOLD}Campies by Fotis Gimian${ENDC}"
+echo -e "${BOLD}(https://github.com/fgimian/campies)${ENDC}"
 echo
 
 if [[ -d '/Volumes/Boot Camp' ]]
