@@ -1,6 +1,10 @@
 # Campies
-
 *A little script to help you download the BootCamp package right for your Mac*
+
+![Campies Logo](https://raw.githubusercontent.com/fgimian/campies/master/images/campies-logo.png)
+
+Awesome artwork provided courtesy of
+[Open Clip Art Library](https://openclipart.org/detail/225405/camp-fire)
 
 This little script was inspired by [brigadier](https://github.com/timsutton/brigadier)
 but attempts to be a cleaner and is a far simpler implementation.
