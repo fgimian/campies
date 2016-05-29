@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 import json
 import os
+import plistlib
 import subprocess
-
-import biplist
-import requests
-import xmltodict
+import urllib2
+from xml.etree import ElementTree
 
 
 # The main Apple catalog URL containing all products and download links
@@ -15,11 +14,12 @@ APPLE_CATALOG_URL = (
 )
 
 # Colours
-bold = lambda s: '\033[1m' + s + '\033[0m'
-red = lambda s: '\033[91m' + s + '\033[0m'
-green = lambda s: '\033[92m' + s + '\033[0m'
-yellow = lambda s: '\033[93m' + s + '\033[0m'
-blue = lambda s: '\033[94m' + s + '\033[0m'
+BOLD = '\033[1m'
+RED = '\033[91m'
+GREEN = '\033[92m'
+YELLOW = '\033[93m'
+BLUE = '\033[94m'
+ENDC = '\033[0m'
 
 
 def get_model():
@@ -30,7 +30,7 @@ def get_model():
         stdout=subprocess.PIPE, stderr=devnull
     )
     hardware_type_xml, _ = system_profiler_process.communicate()
-    hardware_type = biplist.readPlistFromString(hardware_type_xml)
+    hardware_type = plistlib.readPlistFromString(hardware_type_xml)
 
     # We now need to grab the machine model which is buried in the data
     # [{
@@ -43,21 +43,19 @@ def get_model():
 
 
 def get_catalog(catalog_url):
-    catalog_request = requests.get(catalog_url)
-    catalog_request.raise_for_status()
-    catalog_xml = catalog_request.content
-    catalog = biplist.readPlistFromString(catalog_xml)
+    catalog_request = urllib2.urlopen(catalog_url)
+    catalog_xml = catalog_request.read()
+    catalog = plistlib.readPlistFromString(catalog_xml)
     return catalog
 
 
 def get_supported_models(distribution_url):
-    distribution_request = requests.get(distribution_url)
-    distribution_request.raise_for_status()
-    distribution_xml = distribution_request.text
-    distribution = xmltodict.parse(distribution_xml, dict_constructor=dict)
+    distribution_request = urllib2.urlopen(distribution_url)
+    distribution_xml = distribution_request.read()
+    distribution = ElementTree.fromstring(distribution_xml)
 
     # Obtain the installer script (in JavaScript)
-    script = distribution['installer-gui-script']['script'][1]
+    script = distribution.findall('script')[1].text
 
     # Find the line which declares the array that contains all the supported
     # models
@@ -87,18 +85,24 @@ def get_supported_models(distribution_url):
 
 def main():
     print
-    print bold(
+    print (
+        BOLD +
         'BootCamp Package Finder by Fotis Gimian '
-        '(https://github.com/fgimian/bootcamp-package-finder)'
+        '(https://github.com/fgimian/bootcamp-package-finder)' +
+        ENDC
     )
     print
 
     # Get the Mac model using system profiler
     model = get_model()
-    print green('Detected your Mac model as {model}'.format(model=model))
+    print (
+        GREEN +
+        'Detected your Mac model as {model}'.format(model=model) +
+        ENDC
+    )
 
     # Obtain the Apple software catalog
-    print blue('Obtaining the Apple software catalog. please wait...')
+    print BLUE + 'Obtaining the Apple software catalog. please wait...' + ENDC
     catalog = get_catalog(APPLE_CATALOG_URL)
 
     # Determine the possible packages based on the user's model
@@ -120,21 +124,33 @@ def main():
 
     # Let the user know what they should download
     if len(package_urls) == 1:
-        print green(
+        print (
+            GREEN +
             'A BootCamp package for your Mac model was found at '
-            '{package_url}'.format(package_url=package_urls[0])
+            '{package_url}'.format(package_url=package_urls[0]) +
+            ENDC
         )
         print
     elif package_urls:
-        print yellow(
+        print (
+            YELLOW +
             'More than one BootCamp package matched your Mac model at the '
-            'following SRLs:'
+            'following URLs:' +
+            ENDC
         )
         for package_url in package_urls:
-            print yellow('* {package_url}'.format(package_url=package_url))
+            print (
+                YELLOW +
+                '* {package_url}'.format(package_url=package_url) +
+                ENDC
+            )
         print
     else:
-        print red('No BootCamp packages could be found for your Mac model')
+        print (
+            RED +
+            'No BootCamp packages could be found for your Mac model' +
+            ENDC
+        )
         print
         exit(1)
 
