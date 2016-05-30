@@ -5,13 +5,18 @@ import argparse
 from gettext import gettext
 import json
 import os
-import plistlib
 import shutil
 import subprocess
 import sys
 import tempfile
-from urllib2 import urlopen
 from xml.etree import ElementTree
+# Imports that differ between Python 2.x and Python 3.x
+try:
+    from plistlib import readPlistFromString as loads_plist
+    from urllib2 import urlopen
+except ImportError:
+    from plistlib import loads as loads_plist
+    from urllib.request import urlopen
 
 
 # The main Apple catalog URL containing all products and download links
@@ -27,6 +32,18 @@ GREEN = '\033[92m'
 YELLOW = '\033[93m'
 BLUE = '\033[94m'
 ENDC = '\033[0m'
+
+# Whether or not we are using Python 3.x
+PY3 = sys.version_info[0] == 3
+
+# Define an iteritems function for both Pythons
+# (pinched from six at https://github.com/kelp404/six)
+if PY3:
+    def iteritems(d, **kw):
+        return iter(d.items(**kw))
+else:
+    def iteritems(d, **kw):
+        return iter(d.iteritems(**kw))
 
 
 class DetailedArgumentParser(argparse.ArgumentParser):
@@ -60,7 +77,7 @@ def get_model():
 
     # Obtain and parse the output of the system profiler command
     hardware_type_xml = run(['system_profiler', 'SPHardwareDataType', '-xml'])
-    hardware_type = plistlib.readPlistFromString(hardware_type_xml)
+    hardware_type = loads_plist(hardware_type_xml)
 
     # We now need to grab the machine model which is buried in the data
     # [{
@@ -76,7 +93,7 @@ def get_catalog(catalog_url):
     """Obtaines the Apple software catalog as a dict"""
     catalog_request = urlopen(catalog_url)
     catalog_xml = catalog_request.read()
-    catalog = plistlib.readPlistFromString(catalog_xml)
+    catalog = loads_plist(catalog_xml)
     return catalog
 
 
@@ -153,7 +170,7 @@ def find(model=None, catalog_url=None):
 
     # Determine the possible packages based on the user's model
     package_urls = []
-    for id, product in catalog['Products'].iteritems():
+    for id, product in iteritems(catalog['Products']):
         for package in product['Packages']:
             package_url = package['URL']
 
@@ -306,7 +323,8 @@ def main():
 
     # Create the top-level parser
     parser = DetailedArgumentParser()
-    subparsers = parser.add_subparsers(title='commands')
+    subparsers = parser.add_subparsers(title='commands', dest='command')
+    subparsers.required = True
 
     # Create the parser for the find command
     find_parser = subparsers.add_parser(
@@ -335,6 +353,7 @@ def main():
 
     # Pass arguments to the relevant function (excluding the function itself)
     args_dict = vars(args).copy()
+    del args_dict['command']
     del args_dict['command_function']
     try:
         args.command_function(**args_dict)
