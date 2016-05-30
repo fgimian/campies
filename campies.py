@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+from __future__ import print_function, unicode_literals
+
 import argparse
 from gettext import gettext
 import json
@@ -8,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib2
+from urllib2 import urlopen
 from xml.etree import ElementTree
 
 
@@ -37,31 +39,26 @@ class DetailedArgumentParser(argparse.ArgumentParser):
         self.exit(2, gettext('\n%s: error: %s\n') % (self.prog, message))
 
 
-class CommandError(Exception):
-    """Raised when a command fails to run successfully"""
-
-
 def run(command, **kwargs):
     """A simple wrapper around subprocess used to run commands"""
-    devnull = open(os.devnull, 'w')
-
     try:
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
         )
         stdout, stderr = process.communicate()
     except OSError as e:
-        raise CommandError(e)
+        raise subprocess.CalledProcessError(e)
 
     if process.returncode != 0:
-        raise CommandError(stderr)
+        raise subprocess.CalledProcessError(stderr)
 
     return stdout
 
 
 def get_model():
+    """Obtain's the user's Mac model"""
+
     # Obtain and parse the output of the system profiler command
-    devnull = open(os.devnull, 'w')
     hardware_type_xml = run(['system_profiler', 'SPHardwareDataType', '-xml'])
     hardware_type = plistlib.readPlistFromString(hardware_type_xml)
 
@@ -76,14 +73,18 @@ def get_model():
 
 
 def get_catalog(catalog_url):
-    catalog_request = urllib2.urlopen(catalog_url)
+    """Obtaines the Apple software catalog as a dict"""
+    catalog_request = urlopen(catalog_url)
     catalog_xml = catalog_request.read()
     catalog = plistlib.readPlistFromString(catalog_xml)
     return catalog
 
 
 def get_supported_models(distribution_url):
-    distribution_request = urllib2.urlopen(distribution_url)
+    """Gets all supported Mac models for a particular package"""
+
+    # Obtain the distribution XML
+    distribution_request = urlopen(distribution_url)
     distribution_xml = distribution_request.read()
     distribution = ElementTree.fromstring(distribution_xml)
 
@@ -113,20 +114,23 @@ def get_supported_models(distribution_url):
         .replace(';', '') \
         .strip()
     models = json.loads(models_json)
+
     return models
 
 
-def find(model=None, catalog_url=None, verbose=False):
+def find(model=None, catalog_url=None):
+    """Finds the appropriate BootCamp package for the user's Mac model"""
+
     # Get the Mac model using system profiler
     if model is None:
         model = get_model()
-        print (
+        print(
             GREEN +
             'Detected your Mac model as {model}'.format(model=model) +
             ENDC
         )
     else:
-        print (
+        print(
             GREEN +
             'Using provided Mac model {model}'.format(model=model) +
             ENDC
@@ -136,7 +140,7 @@ def find(model=None, catalog_url=None, verbose=False):
     if catalog_url is None:
         catalog_url = APPLE_CATALOG_URL
     else:
-        print (
+        print(
             BLUE +
             'Using custom catalog URL {catalog_url}'.format(
                 catalog_url=catalog_url
@@ -144,7 +148,7 @@ def find(model=None, catalog_url=None, verbose=False):
             ENDC
         )
 
-    print BLUE + 'Obtaining the Apple software catalog' + ENDC
+    print(BLUE + 'Obtaining the Apple software catalog' + ENDC)
     catalog = get_catalog(catalog_url)
 
     # Determine the possible packages based on the user's model
@@ -166,64 +170,61 @@ def find(model=None, catalog_url=None, verbose=False):
 
     # Let the user know what they should download
     if len(package_urls) == 1:
-        print (
+        print(
             GREEN +
             'A BootCamp package for your Mac model was found at '
             '{package_url}'.format(package_url=package_urls[0]) +
             ENDC
         )
-        print
     elif package_urls:
-        print (
+        print(
             YELLOW +
             'More than one BootCamp package matched your Mac model at the '
             'following URLs:' +
             ENDC
         )
         for package_url in package_urls:
-            print (
+            print(
                 YELLOW +
                 '* {package_url}'.format(package_url=package_url) +
                 ENDC
             )
-        print
     else:
-        print (
+        print(
             RED +
             'No BootCamp packages could be found for your Mac model' +
             ENDC
         )
-        print
         exit(1)
 
 
-def build(bootcamp_package, verbose=False):
+def build(bootcamp_package):
+    """Extracts a BootCamp package and builds a ZIP file containing drivers"""
+
+    # Verify that the Boot Camp volume is not already mounted
     if os.path.exists('/Volumes/Boot Camp'):
-        print (
+        print(
             RED +
             'The Boot Camp volume (/Volumes/Boot Camp) already appears to '
             'be mounted' +
             ENDC
         )
-        print RED + 'Please eject this volume and try again' + ENDC
-        print
+        print(RED + 'Please eject this volume and try again' + ENDC)
         exit(1)
 
+    # Verify that the BootCamp package location provided actually exists
     if not os.path.isfile(bootcamp_package):
-        print (
+        print(
             RED +
             'Unable to find file {bootcamp_package}'.format(
                 bootcamp_package=bootcamp_package
             ) +
             ENDC
         )
-        print
         exit(1)
 
-    bootcamp_package_dir = os.path.dirname(bootcamp_package)
     bootcamp_extract_dir = tempfile.mkdtemp(prefix='campies')
-
-    print (
+    print(
         GREEN +
         'Using temporary directory {bootcamp_extract_dir}'.format(
             bootcamp_extract_dir=bootcamp_extract_dir
@@ -231,7 +232,7 @@ def build(bootcamp_package, verbose=False):
         ENDC
     )
 
-    print BLUE + 'Extracting the BootCampESD package' + ENDC
+    print(BLUE + 'Extracting the BootCampESD package' + ENDC)
     run([
         'pkgutil', '--expand', bootcamp_package,
         '{bootcamp_extract_dir}/BootCampESD'.format(
@@ -239,15 +240,14 @@ def build(bootcamp_package, verbose=False):
         )
     ])
 
-    print BLUE + 'Extracting the Payload from BootCampESD package' + ENDC
+    print(BLUE + 'Extracting the Payload from the BootCampESD package' + ENDC)
     run([
         'tar', 'xfz', '{bootcamp_extract_dir}/BootCampESD/Payload'.format(
             bootcamp_extract_dir=bootcamp_extract_dir
-        ),
-        '--strip', '3', '-C', bootcamp_extract_dir
+        ), '--strip', '3', '-C', bootcamp_extract_dir
     ])
 
-    print BLUE + 'Attaching the Windows Support DMG image' + ENDC
+    print(BLUE + 'Attaching the Windows Support DMG image' + ENDC)
     run([
         'hdiutil', 'attach', '-quiet',
         '{bootcamp_extract_dir}/BootCamp/WindowsSupport.dmg'.format(
@@ -260,7 +260,7 @@ def build(bootcamp_package, verbose=False):
     )
     bootcamp = bootcamp_etree.getroot()
     bootcamp_version = bootcamp.find('MsiInfo').find('ProductVersion').text
-    print (
+    print(
         GREEN +
         'Determined your BootCamp version to be {bootcamp_version}'.format(
             bootcamp_version=bootcamp_version
@@ -268,6 +268,7 @@ def build(bootcamp_package, verbose=False):
         ENDC
     )
 
+    bootcamp_package_dir = os.path.dirname(bootcamp_package)
     bootcamp_archive = (
         '{bootcamp_package_dir}/BootCamp {bootcamp_version}'.format(
             bootcamp_package_dir=bootcamp_package_dir,
@@ -275,39 +276,36 @@ def build(bootcamp_package, verbose=False):
         )
     )
 
-    print (
+    print(
         BLUE +
         'Creating a ZIP archive of the BootCamp Windows installer' +
         ENDC
     )
     shutil.make_archive(bootcamp_archive, 'zip', '/Volumes/Boot Camp')
 
-    print BLUE + 'Detaching the Windows Support DMG image' + ENDC
+    print(BLUE + 'Detaching the Windows Support DMG image' + ENDC)
     run(['hdiutil', 'detach', '-quiet', '/Volumes/Boot Camp'])
 
-    print BLUE + 'Cleaning up temporary directory' + ENDC
+    print(BLUE + 'Cleaning up temporary directory' + ENDC)
     shutil.rmtree(bootcamp_extract_dir)
 
-    print GREEN + 'All processing was completed successfully!' + ENDC
-    print (
+    print(GREEN + 'All processing was completed successfully!' + ENDC)
+    print(
         GREEN +
         'Your BootCamp archive is available at '
         '"{bootcamp_archive}.zip"'.format(bootcamp_archive=bootcamp_archive) +
         ENDC
     )
-    print
 
 
 def main():
-    print
-    print BOLD + 'Campies by Fotis Gimian' + ENDC
-    print BOLD + '(https://github.com/fgimian/campies)' + ENDC
-    print
+    # Print script header
+    print(BOLD + 'Campies by Fotis Gimian' + ENDC)
+    print(BOLD + '(https://github.com/fgimian/campies)' + ENDC)
+    print()
+
     # Create the top-level parser
     parser = DetailedArgumentParser()
-    parser.add_argument(
-        '-v', '--verbose', action='store_true', help='increase verbosity'
-    )
     subparsers = parser.add_subparsers(title='commands')
 
     # Create the parser for the find command
@@ -341,8 +339,7 @@ def main():
     try:
         args.command_function(**args_dict)
     except KeyboardInterrupt:
-        print YELLOW + 'User cancelled operation' + ENDC
-        print
+        print(YELLOW + 'User cancelled operation' + ENDC)
 
 
 if __name__ == '__main__':
