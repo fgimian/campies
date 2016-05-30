@@ -10,13 +10,15 @@ import subprocess
 import sys
 import tempfile
 from xml.etree import ElementTree
+import xml
 # Imports that differ between Python 2.x and Python 3.x
 try:
     from plistlib import readPlistFromString as loads_plist
-    from urllib2 import urlopen
+    from urllib2 import urlopen, URLError, HTTPError
 except ImportError:
     from plistlib import loads as loads_plist
     from urllib.request import urlopen
+    from urllib.error import URLError, HTTPError
 
 
 # The main Apple catalog URL containing all products and download links
@@ -56,6 +58,14 @@ class DetailedArgumentParser(argparse.ArgumentParser):
         self.exit(2, gettext('\n%s: error: %s\n') % (self.prog, message))
 
 
+class CampiesError(Exception):
+    """A high-level exception that is used for all Campies errors"""
+
+
+class CampiesSubprocessError(CampiesError):
+    """An exception for any errors encountered when running a sub-process"""
+
+
 def run(command, **kwargs):
     """A simple wrapper around subprocess used to run commands"""
     try:
@@ -64,10 +74,10 @@ def run(command, **kwargs):
         )
         stdout, stderr = process.communicate()
     except OSError as e:
-        raise subprocess.CalledProcessError(e)
+        raise CampiesSubprocessError(e)
 
     if process.returncode != 0:
-        raise subprocess.CalledProcessError(stderr)
+        raise CampiesSubprocessError(stderr)
 
     return stdout
 
@@ -76,8 +86,20 @@ def get_model():
     """Obtain's the user's Mac model"""
 
     # Obtain and parse the output of the system profiler command
-    hardware_type_xml = run(['system_profiler', 'SPHardwareDataType', '-xml'])
-    hardware_type = loads_plist(hardware_type_xml)
+    try:
+        hardware_type_xml = run([
+            'system_profiler', 'SPHardwareDataType', '-xml'
+        ])
+    except CampiesSubprocessError:
+        raise CampiesError(
+            'Unable to run the command required to obtain the model'
+        )
+    try:
+        hardware_type = loads_plist(hardware_type_xml)
+    except xml.parsers.expat.ExpatError:
+        raise CampiesError(
+            'Unable to parse hardware XML to obtain the model'
+        )
 
     # We now need to grab the machine model which is buried in the data
     # [{
@@ -86,14 +108,34 @@ def get_model():
     #       '_name': 'hardware_overview',
     #       'machine_model': 'MacBookPro11,5',
     #       'machine_name': 'MacBook Pro',
-    return hardware_type[0]['_items'][0]['machine_model']
+    try:
+        model = hardware_type[0]['_items'][0]['machine_model']
+    except IndexError:
+        raise CampiesError(
+            'Unable to find model in the hardware XML'
+        )
+
+    return model
 
 
 def get_catalog(catalog_url):
     """Obtaines the Apple software catalog as a dict"""
-    catalog_request = urlopen(catalog_url)
+    try:
+        catalog_request = urlopen(catalog_url)
+    except (IOError, URLError, HTTPError):
+        raise CampiesError(
+            'Unable to download catalog URL {catalog_url}'.format(
+                catalog_url=catalog_url
+            )
+        )
+
     catalog_xml = catalog_request.read()
-    catalog = loads_plist(catalog_xml)
+    try:
+        catalog = loads_plist(catalog_xml)
+    except xml.parsers.expat.ExpatError:
+        raise CampiesError(
+            'Unable to parse catalog XML to obtain software details'
+        )
     return catalog
 
 
@@ -101,12 +143,31 @@ def get_supported_models(distribution_url):
     """Gets all supported Mac models for a particular package"""
 
     # Obtain the distribution XML
-    distribution_request = urlopen(distribution_url)
+    try:
+        distribution_request = urlopen(distribution_url)
+    except (IOError, URLError, HTTPError):
+        raise CampiesError(
+            'Unable to download distribution URL {distribution_url}'.format(
+                distribution_url=distribution_url
+            )
+        )
+
     distribution_xml = distribution_request.read()
-    distribution = ElementTree.fromstring(distribution_xml)
+    try:
+        distribution = ElementTree.fromstring(distribution_xml)
+    except xml.etree.ElementTree.ParseError:
+        raise CampiesError(
+            'Unable to parse distribution XML to obtain the supported model '
+            'script'
+        )
 
     # Obtain the installer script (in JavaScript)
-    script = distribution.findall('script')[1].text
+    try:
+        script = distribution.findall('script')[1].text
+    except IndexError:
+        raise CampiesError(
+            'Unable to find supported model script in distribution XML'
+        )
 
     # Find the line which declares the array that contains all the supported
     # models
@@ -119,7 +180,12 @@ def get_supported_models(distribution_url):
     # If this declaration is not found, we assume no models are supported
     # (this should never happen)
     if models_js is None:
-        return []
+        raise CampiesError(
+            'Unable to find models definition in the distribution script at '
+            '{distribution_url}'.format(
+                distribution_url=distribution_url
+            )
+        )
 
     # Convert the JavaScript variable definition to JSON
     # JavaScript: var models = ['MacBookPro9,1','MacBookPro9,2',];
@@ -130,9 +196,46 @@ def get_supported_models(distribution_url):
         .replace(',]', ']') \
         .replace(';', '') \
         .strip()
-    models = json.loads(models_json)
+
+    try:
+        models = json.loads(models_json)
+    except ValueError:
+        raise CampiesError(
+            'Unable to parse models in the distribution script at '
+            '{distribution_url}'.format(
+                distribution_url=distribution_url
+            )
+        )
 
     return models
+
+
+def get_package_urls(catalog, model):
+    """Gets all possible package URLs for a particular Mac model"""
+    package_urls = []
+
+    try:
+        for id, product in iteritems(catalog['Products']):
+            for package in product['Packages']:
+                package_url = package['URL']
+
+                # Skip packages that are not BootCamp
+                if not package_url.endswith('BootCampESD.pkg'):
+                    continue
+
+                # Determine if the user's model is supported by the package
+                # and add that package's URL to our list
+                distribution_url = product['Distributions']['English']
+                supported_models = get_supported_models(distribution_url)
+                if model in supported_models:
+                    package_urls.append(package_url)
+    except IndexError:
+        raise CampiesError(
+            'Encountered a problem while attempting to find suitable '
+            'packages for a given Mac model'
+        )
+
+    return package_urls
 
 
 def find(model=None, catalog_url=None):
@@ -169,23 +272,7 @@ def find(model=None, catalog_url=None):
     catalog = get_catalog(catalog_url)
 
     # Determine the possible packages based on the user's model
-    package_urls = []
-    for id, product in iteritems(catalog['Products']):
-        for package in product['Packages']:
-            package_url = package['URL']
-
-            # Skip packages that are not BootCamp
-            if not package_url.endswith('BootCampESD.pkg'):
-                continue
-
-            # Determine if the user's model is supported by the package
-            # and add that package's URL to our list
-            distribution_url = product['Distributions']['English']
-            supported_models = get_supported_models(distribution_url)
-            if model in supported_models:
-                package_urls.append(package_url)
-
-    # Let the user know what they should download
+    package_urls = get_package_urls(catalog, model)
     if len(package_urls) == 1:
         print(
             GREEN +
@@ -207,12 +294,9 @@ def find(model=None, catalog_url=None):
                 ENDC
             )
     else:
-        print(
-            RED +
-            'No BootCamp packages could be found for your Mac model' +
-            ENDC
+        raise CampiesError(
+            'No BootCamp packages could be found for your Mac model'
         )
-        exit(1)
 
 
 def build(bootcamp_package):
@@ -220,25 +304,18 @@ def build(bootcamp_package):
 
     # Verify that the Boot Camp volume is not already mounted
     if os.path.exists('/Volumes/Boot Camp'):
-        print(
-            RED +
+        raise CampiesError(
             'The Boot Camp volume (/Volumes/Boot Camp) already appears to '
-            'be mounted' +
-            ENDC
+            'be mounted; please eject this volume and try again'
         )
-        print(RED + 'Please eject this volume and try again' + ENDC)
-        exit(1)
 
     # Verify that the BootCamp package location provided actually exists
     if not os.path.isfile(bootcamp_package):
-        print(
-            RED +
+        raise CampiesError(
             'Unable to find file {bootcamp_package}'.format(
                 bootcamp_package=bootcamp_package
-            ) +
-            ENDC
+            )
         )
-        exit(1)
 
     bootcamp_extract_dir = tempfile.mkdtemp(prefix='campies')
     print(
@@ -250,33 +327,54 @@ def build(bootcamp_package):
     )
 
     print(BLUE + 'Extracting the BootCampESD package' + ENDC)
-    run([
-        'pkgutil', '--expand', bootcamp_package,
-        '{bootcamp_extract_dir}/BootCampESD'.format(
-            bootcamp_extract_dir=bootcamp_extract_dir
-        )
-    ])
+    try:
+        run([
+            'pkgutil', '--expand', bootcamp_package,
+            '{bootcamp_extract_dir}/BootCampESD'.format(
+                bootcamp_extract_dir=bootcamp_extract_dir
+            )
+        ])
+    except CampiesSubprocessError:
+        raise CampiesError('Unable to extract the BootCampESD package')
 
     print(BLUE + 'Extracting the Payload from the BootCampESD package' + ENDC)
-    run([
-        'tar', 'xfz', '{bootcamp_extract_dir}/BootCampESD/Payload'.format(
-            bootcamp_extract_dir=bootcamp_extract_dir
-        ), '--strip', '3', '-C', bootcamp_extract_dir
-    ])
+    try:
+        run([
+            'tar', 'xfz', '{bootcamp_extract_dir}/BootCampESD/Payload'.format(
+                bootcamp_extract_dir=bootcamp_extract_dir
+            ), '--strip', '3', '-C', bootcamp_extract_dir
+        ])
+    except CampiesSubprocessError:
+        raise CampiesError(
+            'Unable to extract Payload from the BootCampESD package'
+        )
 
     print(BLUE + 'Attaching the Windows Support DMG image' + ENDC)
-    run([
-        'hdiutil', 'attach', '-quiet',
-        '{bootcamp_extract_dir}/BootCamp/WindowsSupport.dmg'.format(
-            bootcamp_extract_dir=bootcamp_extract_dir
-        )
-    ])
+    try:
+        run([
+            'hdiutil', 'attach', '-quiet',
+            '{bootcamp_extract_dir}/BootCamp/WindowsSupport.dmg'.format(
+                bootcamp_extract_dir=bootcamp_extract_dir
+            )
+        ])
+    except CampiesSubprocessError:
+        raise CampiesError('Unable to attach the Windows Support DMG image')
 
-    bootcamp_etree = ElementTree.parse(
-        '/Volumes/Boot Camp/BootCamp/BootCamp.xml'
-    )
-    bootcamp = bootcamp_etree.getroot()
-    bootcamp_version = bootcamp.find('MsiInfo').find('ProductVersion').text
+    try:
+        bootcamp_etree = ElementTree.parse(
+            '/Volumes/Boot Camp/BootCamp/BootCamp.xml'
+        )
+        bootcamp = bootcamp_etree.getroot()
+    except xml.etree.ElementTree.ParseError:
+        raise CampiesError(
+            'Unable to parse BootCamp XML to obtain the software version'
+        )
+
+    try:
+        bootcamp_version = bootcamp.find('MsiInfo').find('ProductVersion').text
+    except AttributeError:
+        raise CampiesError('Unable to determine BootCamp version')
+
     print(
         GREEN +
         'Determined your BootCamp version to be {bootcamp_version}'.format(
@@ -298,13 +396,24 @@ def build(bootcamp_package):
         'Creating a ZIP archive of the BootCamp Windows installer' +
         ENDC
     )
-    shutil.make_archive(bootcamp_archive, 'zip', '/Volumes/Boot Camp')
+    try:
+        shutil.make_archive(bootcamp_archive, 'zip', '/Volumes/Boot Camp')
+    except OSError:
+        raise CampiesError(
+            'Unable to create ZIP archive of the BootCamp Windows installer'
+        )
 
     print(BLUE + 'Detaching the Windows Support DMG image' + ENDC)
-    run(['hdiutil', 'detach', '-quiet', '/Volumes/Boot Camp'])
+    try:
+        run(['hdiutil', 'detach', '-quiet', '/Volumes/Boot Camp'])
+    except CampiesSubprocessError:
+        raise CampiesError('Unable to detach the Windows Support DMG image')
 
     print(BLUE + 'Cleaning up temporary directory' + ENDC)
-    shutil.rmtree(bootcamp_extract_dir)
+    try:
+        shutil.rmtree(bootcamp_extract_dir)
+    except OSError:
+        print(YELLOW + 'Unable to clean temporary directory' + ENDC)
 
     print(GREEN + 'All processing was completed successfully!' + ENDC)
     print(
@@ -355,10 +464,18 @@ def main():
     args_dict = vars(args).copy()
     del args_dict['command']
     del args_dict['command_function']
+
+    # Run the appropriate command function
     try:
         args.command_function(**args_dict)
+    except CampiesError as e:
+        print(RED + str(e) + ENDC)
+        exit(1)
     except KeyboardInterrupt:
         print(YELLOW + 'User cancelled operation' + ENDC)
+    except Exception as e:
+        print(RED + 'An unexpected error occurred: ' + str(e) + ENDC)
+        exit(1)
 
 
 if __name__ == '__main__':
