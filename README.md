@@ -9,7 +9,7 @@ Awesome artwork provided courtesy of
 This little script was inspired by [brigadier](https://github.com/timsutton/brigadier)
 but attempts to be a cleaner and is a far simpler implementation.
 
-## Using the Scripts
+## Using the Script
 
 1. Dowload the campies script
 
@@ -35,9 +35,9 @@ but attempts to be a cleaner and is a far simpler implementation.
     ./campies.py build ~/Downloads/BootCampESD.pkg
     ```
 
-    **Note**: Please replace the path of BootCampESD if required.
+    **Note**: Please replace the path of BootCampESD.pkg file if required.
 
-5. You'll now be given the location of your BootCamp.zip file which may be used
+5. You'll now be given the location of your BootCamp ZIP file which may be used
    in Windows to install your BootCamp drivers.
 
 You may see detailed help for each command using the `--help` argument if you

@@ -122,7 +122,7 @@ def find(model=None, catalog_url=None, verbose=False):
             ENDC
         )
 
-    print BLUE + 'Obtaining the Apple software catalog. please wait...' + ENDC
+    print BLUE + 'Obtaining the Apple software catalog' + ENDC
     catalog = get_catalog(catalog_url)
 
     # Determine the possible packages based on the user's model
