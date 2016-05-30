@@ -28,19 +28,41 @@ ENDC = '\033[0m'
 
 
 class DetailedArgumentParser(argparse.ArgumentParser):
+    """
+    Overrides the default argparse ArgumentParser to display detailed help
+    upon error instead of the shorter help
+    """
     def error(self, message):
         self.print_help(sys.stderr)
         self.exit(2, gettext('\n%s: error: %s\n') % (self.prog, message))
 
 
+class CommandError(Exception):
+    """Raised when a command fails to run successfully"""
+
+
+def run(command, **kwargs):
+    """A simple wrapper around subprocess used to run commands"""
+    devnull = open(os.devnull, 'w')
+
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs
+        )
+        stdout, stderr = process.communicate()
+    except OSError as e:
+        raise CommandError(e)
+
+    if process.returncode != 0:
+        raise CommandError(stderr)
+
+    return stdout
+
+
 def get_model():
     # Obtain and parse the output of the system profiler command
     devnull = open(os.devnull, 'w')
-    system_profiler_process = subprocess.Popen(
-        ['system_profiler', 'SPHardwareDataType', '-xml'],
-        stdout=subprocess.PIPE, stderr=devnull
-    )
-    hardware_type_xml, _ = system_profiler_process.communicate()
+    hardware_type_xml = run(['system_profiler', 'SPHardwareDataType', '-xml'])
     hardware_type = plistlib.readPlistFromString(hardware_type_xml)
 
     # We now need to grab the machine model which is buried in the data
@@ -175,25 +197,6 @@ def find(model=None, catalog_url=None, verbose=False):
         exit(1)
 
 
-class CommandError(Exception):
-    """Raised when a command fails to run successfully"""
-
-
-def run_quietly(command, **kwargs):
-    devnull = open(os.devnull, 'w')
-
-    try:
-        process = subprocess.Popen(
-            command, stdout=devnull, stderr=subprocess.PIPE, **kwargs
-        )
-        _, stderr = process.communicate()
-    except OSError as e:
-        raise CommandError(e)
-
-    if process.returncode != 0:
-        raise CommandError(stderr)
-
-
 def build(bootcamp_package, verbose=False):
     if os.path.exists('/Volumes/Boot Camp'):
         print (
@@ -229,7 +232,7 @@ def build(bootcamp_package, verbose=False):
     )
 
     print BLUE + 'Extracting the BootCampESD package' + ENDC
-    run_quietly([
+    run([
         'pkgutil', '--expand', bootcamp_package,
         '{bootcamp_extract_dir}/BootCampESD'.format(
             bootcamp_extract_dir=bootcamp_extract_dir
@@ -237,7 +240,7 @@ def build(bootcamp_package, verbose=False):
     ])
 
     print BLUE + 'Extracting the Payload from BootCampESD package' + ENDC
-    run_quietly([
+    run([
         'tar', 'xfz', '{bootcamp_extract_dir}/BootCampESD/Payload'.format(
             bootcamp_extract_dir=bootcamp_extract_dir
         ),
@@ -245,7 +248,7 @@ def build(bootcamp_package, verbose=False):
     ])
 
     print BLUE + 'Attaching the Windows Support DMG image' + ENDC
-    run_quietly([
+    run([
         'hdiutil', 'attach', '-quiet',
         '{bootcamp_extract_dir}/BootCamp/WindowsSupport.dmg'.format(
             bootcamp_extract_dir=bootcamp_extract_dir
@@ -280,7 +283,7 @@ def build(bootcamp_package, verbose=False):
     shutil.make_archive(bootcamp_archive, 'zip', '/Volumes/Boot Camp')
 
     print BLUE + 'Detaching the Windows Support DMG image' + ENDC
-    run_quietly(['hdiutil', 'detach', '-quiet', '/Volumes/Boot Camp'])
+    run(['hdiutil', 'detach', '-quiet', '/Volumes/Boot Camp'])
 
     print BLUE + 'Cleaning up temporary directory' + ENDC
     shutil.rmtree(bootcamp_extract_dir)
@@ -335,7 +338,11 @@ def main():
     # Pass arguments to the relevant function (excluding the function itself)
     args_dict = vars(args).copy()
     del args_dict['command_function']
-    args.command_function(**args_dict)
+    try:
+        args.command_function(**args_dict)
+    except KeyboardInterrupt:
+        print YELLOW + 'User cancelled operation' + ENDC
+        print
 
 
 if __name__ == '__main__':
