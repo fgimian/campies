@@ -289,7 +289,7 @@ def build(bootcamp_package, verbose=False):
     print (
         GREEN +
         'Your BootCamp archive is available at '
-        '"{bootcamp_archive}".zip'.format(bootcamp_archive=bootcamp_archive) +
+        '"{bootcamp_archive}.zip"'.format(bootcamp_archive=bootcamp_archive) +
         ENDC
     )
     print
