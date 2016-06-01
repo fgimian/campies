@@ -4,7 +4,7 @@
 
 ![Campies Logo](https://raw.githubusercontent.com/fgimian/campies/master/images/campies-logo.png)
 
-Awesome artwork provided courtesy of
+Artwork courtesy of
 [Open Clip Art Library](https://openclipart.org/detail/225405/camp-fire)
 
 ## Introduction
