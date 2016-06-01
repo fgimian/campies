@@ -9,8 +9,10 @@ Awesome artwork provided courtesy of
 
 ## Introduction
 
-This little script was inspired by [brigadier](https://github.com/timsutton/brigadier)
-but attempts to be a cleaner and is a far simpler implementation.
+Campies determines your Mac model and downloads the appropriate BootCamp
+package for you.  It was inspired by
+[brigadier](https://github.com/timsutton/brigadier) but attempts to be a
+cleaner and is a far simpler implementation.
 
 ## Quick Start
 
