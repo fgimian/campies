@@ -383,7 +383,7 @@ def build(bootcamp_package):
         ENDC
     )
 
-    bootcamp_package_dir = os.path.dirname(bootcamp_package)
+    bootcamp_package_dir = os.path.dirname(os.path.abspath(bootcamp_package))
     bootcamp_archive = (
         '{bootcamp_package_dir}/BootCamp {bootcamp_version}'.format(
             bootcamp_package_dir=bootcamp_package_dir,
