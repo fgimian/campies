@@ -361,9 +361,12 @@ def build(bootcamp_package):
         raise CampiesError('Unable to attach the Windows Support DMG image')
 
     try:
-        bootcamp_etree = ElementTree.parse(
-            '/Volumes/Boot Camp/BootCamp/BootCamp.xml'
-        )
+        if os.path.exists('/Volumes/Boot Camp/BootCamp/BootCamp.xml'):
+            bootcamp_xml = '/Volumes/Boot Camp/BootCamp/BootCamp.xml'
+        else:
+            bootcamp_xml = '/Volumes/Boot Camp/BootCamp.xml'
+
+        bootcamp_etree = ElementTree.parse(bootcamp_xml)
         bootcamp = bootcamp_etree.getroot()
     except xml.etree.ElementTree.ParseError:
         raise CampiesError(
